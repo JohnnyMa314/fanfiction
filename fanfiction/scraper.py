@@ -5,12 +5,15 @@ except ImportError:
     from urllib import unquote_plus
 import time, re, requests
 from bs4 import BeautifulSoup
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+import numpy as np
 
 class Scraper:
 
     def __init__(self):
         self.base_url = 'http://fanfiction.net/'
-        self.rate_limit = 1
+        self.rate_limit = 2
         self.parser = "html.parser"
 
     def get_genres(self, genre_text):
@@ -47,9 +50,15 @@ class Scraper:
             -rated: the story's rating.
         """
         url = '{0}/s/{1}'.format(self.base_url, story_id)
-        result = requests.get(url)
-        html = result.content
-        soup = BeautifulSoup(html, self.parser)
+
+        # selenium set up to get around CloudFlare protection
+        wd = webdriver.Chrome()
+        wd.get(url)
+        page_source = wd.page_source
+        wd.close()
+
+        # populating tables
+        soup = BeautifulSoup(page_source, "lxml")
         pre_story_links = soup.find(id='pre_story_links').find_all('a')
         author_id = int(re.search(r"var userid = (.*);", str(soup)).groups()[0]);
         title = re.search(r"var title = (.*);", str(soup)).groups()[0];
@@ -66,7 +75,7 @@ class Scraper:
             'author_id': author_id,
             'title': title,
             'updated': int(times[0]['data-xutime']),
-            'published': int(times[1]['data-xutime']),
+            #'published': int(times[1]['data-xutime']),
             'lang': metadata_parts[1].strip(),
             'genres': genres
         }
@@ -88,28 +97,46 @@ class Scraper:
             metadata['status'] = 'Incomplete'
         return metadata
 
-    def scrape_story(self, story_id, keep_html=False):
+    def scrape_n_chapters(self, story_id, n, keep_html=False):
         metadata = self.scrape_story_metadata(story_id)
         metadata['chapters'] = {}
         metadata['reviews'] = {}
+        title = metadata.get('title')
         num_chapters = metadata['num_chapters']
+        if n > num_chapters:
+            n = num_chapters
+
+        # to avoid first chapter credits/thanks, we sample randomly from total number of chapters.
+        chapters = np.random.choice(range(num_chapters), n, replace=False) + 1
+
+        print(f'Scraping Story ID: {story_id} ')
+        print(f'Title: {title}')
         # rate limit to follow fanfiction.net TOS
         time.sleep(self.rate_limit)
-        for chapter_id in range(1, num_chapters + 1):
+        for chapter_id in chapters:
+            print(f'Scraping chapter: {chapter_id}')
             time.sleep(self.rate_limit)
             chapter = self.scrape_chapter(story_id, chapter_id)
             time.sleep(self.rate_limit)
-            chapter_reviews = self.scrape_reviews_for_chapter(
-                story_id, chapter_id)
+            # dont need reviews for now. 2-7-21
+
+            # chapter_reviews = self.scrape_reviews_for_chapter(
+            #     story_id, chapter_id)
             metadata['chapters'][chapter_id] = chapter
-            metadata['reviews'][chapter_id] = chapter_reviews
+            # metadata['reviews'][chapter_id] = chapter_reviews
         return metadata
 
     def scrape_chapter(self, story_id, chapter_id, keep_html=False):
         url = '{0}/s/{1}/{2}'.format(self.base_url, story_id, chapter_id)
-        result = requests.get(url)
-        html = result.content
-        soup = BeautifulSoup(html, self.parser)
+
+        # selenium set up to get around CloudFlare protection
+        wd = webdriver.Chrome()
+        wd.get(url)
+        page_source = wd.page_source
+        wd.close()
+
+        # populating tables
+        soup = BeautifulSoup(page_source, "lxml")
         chapter = soup.find(class_='storytext')
         if not keep_html:
             chapter_text = chapter.get_text(' ').encode('utf8')
@@ -125,9 +152,15 @@ class Scraper:
             the timestamp of the review, and the text of the review.
         """
         url = '{0}/r/{1}/{2}'.format(self.base_url, story_id, chapter_id)
-        result = requests.get(url)
-        html = result.content
-        soup = BeautifulSoup(html, self.parser)
+        
+        # selenium set up to get around CloudFlare protection
+        wd = webdriver.Chrome()
+        wd.get(url)
+        page_source = wd.page_source
+        wd.close()
+
+        # populating tables
+        soup = BeautifulSoup(page_source, "lxml")
         reviews_table = soup.find(class_='table-striped').tbody
         reviews_tds = reviews_table.find_all('td')
         reviews = []
